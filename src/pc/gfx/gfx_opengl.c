@@ -45,11 +45,17 @@ struct ShaderProgram {
     GLint attrib_locations[7];
     uint8_t attrib_sizes[7];
     uint8_t num_attribs;
+    bool used_noise;
+    GLint frame_count_location;
+    GLint window_height_location;
 };
 
 static struct ShaderProgram shader_program_pool[64];
 static uint8_t shader_program_pool_size;
 static GLuint opengl_vbo;
+
+static uint32_t frame_count;
+static uint32_t current_height;
 
 static bool gfx_opengl_z_is_from_0_to_1(void) {
     return false;
@@ -66,6 +72,13 @@ static void gfx_opengl_vertex_array_set_attribs(struct ShaderProgram *prg) {
     }
 }
 
+static void gfx_opengl_set_uniforms(struct ShaderProgram *prg) {
+    if (prg->used_noise) {
+        glUniform1i(prg->frame_count_location, frame_count);
+        glUniform1i(prg->window_height_location, current_height);
+    }
+}
+
 static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
     if (old_prg != NULL) {
         for (int i = 0; i < old_prg->num_attribs; i++) {
@@ -77,6 +90,7 @@ static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
 static void gfx_opengl_load_shader(struct ShaderProgram *new_prg) {
     glUseProgram(new_prg->opengl_program_id);
     gfx_opengl_vertex_array_set_attribs(new_prg);
+    gfx_opengl_set_uniforms(new_prg);
 }
 
 static void append_str(char *buf, size_t *len, const char *str) {
@@ -167,6 +181,8 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shad
     bool opt_alpha = (shader_id & SHADER_OPT_ALPHA) != 0;
     bool opt_fog = (shader_id & SHADER_OPT_FOG) != 0;
     bool opt_texture_edge = (shader_id & SHADER_OPT_TEXTURE_EDGE) != 0;
+    bool opt_noise = (shader_id & SHADER_OPT_NOISE) != 0;
+
     bool used_textures[2] = {0, 0};
     int num_inputs = 0;
     for (int i = 0; i < 2; i++) {
@@ -253,6 +269,17 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shad
     if (used_textures[1]) {
         append_line(fs_buf, &fs_len, "uniform sampler2D uTex1;");
     }
+
+    if (opt_alpha && opt_noise) {
+        append_line(fs_buf, &fs_len, "uniform int frame_count;");
+        append_line(fs_buf, &fs_len, "uniform int window_height;");
+
+        append_line(fs_buf, &fs_len, "float random(in vec3 value) {");
+        append_line(fs_buf, &fs_len, "    float random = dot(sin(value), vec3(12.9898, 78.233, 37.719));");
+        append_line(fs_buf, &fs_len, "    return fract(sin(random) * 143758.5453);");
+        append_line(fs_buf, &fs_len, "}");
+    }
+
     append_line(fs_buf, &fs_len, "void main() {");
     
     if (used_textures[0]) {
@@ -285,7 +312,11 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shad
             append_line(fs_buf, &fs_len, "texel = mix(texel, vFog.rgb, vFog.a);");
         }
     }
-    
+
+    if (opt_alpha && opt_noise) {
+        append_line(fs_buf, &fs_len, "texel.a *= floor(random(vec3(floor(gl_FragCoord.xy * (240.0 / float(window_height))), float(frame_count))) + 0.5);");
+    }
+ 
     if (opt_alpha) {
         append_line(fs_buf, &fs_len, "gl_FragColor = texel;");
     } else {
@@ -384,7 +415,15 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shad
         GLint sampler_attrib = glGetUniformLocation(shader_program, "uTex1");
         glUniform1i(sampler_attrib, 1);
     }
-    
+
+    if (opt_alpha && opt_noise) {
+        prg->frame_count_location = glGetUniformLocation(shader_program, "frame_count");
+        prg->window_height_location = glGetUniformLocation(shader_program, "window_height");
+        prg->used_noise = true;
+    } else {
+        prg->used_noise = false;
+    }
+ 
     return prg;
 }
 
@@ -458,6 +497,7 @@ static void gfx_opengl_set_zmode_decal(bool zmode_decal) {
 
 static void gfx_opengl_set_viewport(int x, int y, int width, int height) {
     glViewport(x, y, width, height);
+    current_height = height;
 }
 
 static void gfx_opengl_set_scissor(int x, int y, int width, int height) {
@@ -496,6 +536,8 @@ static void gfx_opengl_init(void) {
 }
 
 static void gfx_opengl_start_frame(void) {
+    frame_count++;
+
     glDisable(GL_SCISSOR_TEST);
     glDepthMask(GL_TRUE); // Must be set to clear Z-buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
