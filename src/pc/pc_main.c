@@ -13,6 +13,9 @@
 #include "gfx/gfx_pc.h"
 #include "gfx/gfx_opengl_legacy.h"
 #include "gfx/gfx_opengl.h"
+#ifdef ENABLE_DX12
+#include "gfx/gfx_direct3d12.h"
+#endif
 #include "gfx/gfx_sdl.h"
 
 #include "audio/audio_api.h"
@@ -148,9 +151,16 @@ void main_func(void) {
 
     configfile_load(configfile_name());
 
+    printf("main draw");
     if(configWindow.renderer == 1) {
       wm_api = &gfx_sdl;
       rendering_api = &gfx_opengl_legacy_api;
+    } else if(configWindow.renderer == 2) {
+    printf("using dx12");
+    #ifdef ENABLE_DX12
+      wm_api = &gfx_dxgi_api;
+      rendering_api = &gfx_direct3d12_api;
+    #endif
     } else {
       configWindow.renderer = 0;
       wm_api = &gfx_sdl;

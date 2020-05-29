@@ -49,7 +49,7 @@ ConfigWindow configWindow       = {
     .settings_changed = false,
 };
 unsigned int configFiltering    = 1;          // 0=force nearest, 1=linear, (TODO) 2=three-point
-unsigned int configRenderer    = 0;          // 0=OpenGL, 1=OpenGL Legacy
+unsigned int configRenderer    = 0;          // 0=OpenGL, 1=OpenGL Legacy, 2 = DirectX 12
 unsigned int configMasterVolume = MAX_VOLUME; // 0 - MAX_VOLUME
 
 // Keyboard mappings (VK_ values, by default keyboard/gamepad/mouse)
