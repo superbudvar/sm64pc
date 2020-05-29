@@ -49,6 +49,7 @@ ConfigWindow configWindow       = {
     .settings_changed = false,
 };
 unsigned int configFiltering    = 1;          // 0=force nearest, 1=linear, (TODO) 2=three-point
+unsigned int configRenderer    = 0;          // 0=OpenGL, 1=OpenGL Legacy
 unsigned int configMasterVolume = MAX_VOLUME; // 0 - MAX_VOLUME
 
 // Keyboard mappings (VK_ values, by default keyboard/gamepad/mouse)
@@ -86,6 +87,7 @@ bool         configHUD           = true;
 
 static const struct ConfigOption options[] = {
     {.name = "fullscreen",           .type = CONFIG_TYPE_BOOL, .boolValue = &configWindow.fullscreen},
+    {.name = "renderer",             .type = CONFIG_TYPE_UINT, .uintValue = &configWindow.renderer},
     {.name = "window_x",             .type = CONFIG_TYPE_UINT, .uintValue = &configWindow.x},
     {.name = "window_y",             .type = CONFIG_TYPE_UINT, .uintValue = &configWindow.y},
     {.name = "window_w",             .type = CONFIG_TYPE_UINT, .uintValue = &configWindow.w},

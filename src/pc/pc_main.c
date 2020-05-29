@@ -11,6 +11,7 @@
 #include "audio/external.h"
 
 #include "gfx/gfx_pc.h"
+#include "gfx/gfx_opengl_legacy.h"
 #include "gfx/gfx_opengl.h"
 #include "gfx/gfx_sdl.h"
 
@@ -147,8 +148,14 @@ void main_func(void) {
 
     configfile_load(configfile_name());
 
-    wm_api = &gfx_sdl;
-    rendering_api = &gfx_opengl_api;
+    if(configWindow.renderer == 1) {
+      wm_api = &gfx_sdl;
+      rendering_api = &gfx_opengl_legacy_api;
+    } else {
+      configWindow.renderer = 0;
+      wm_api = &gfx_sdl;
+      rendering_api = &gfx_opengl_api;
+    }
     gfx_init(wm_api, rendering_api);
 
     if (audio_api == NULL && audio_sdl.init()) 

@@ -1,4 +1,3 @@
-#ifdef LEGACY_GL
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -89,7 +88,7 @@ static bool gl_adv_fog = false;
 
 static const float c_white[] = { 1.f, 1.f, 1.f, 1.f };
 
-static bool gfx_opengl_z_is_from_0_to_1(void) {
+static bool gfx_opengl_legacy_z_is_from_0_to_1(void) {
     return false;
 }
 
@@ -183,7 +182,7 @@ static inline void texenv_set_texture_texture(UNUSED struct ShaderProgram *prg) 
     TEXENV_COMBINE_SET1(ALPHA, GL_REPLACE, GL_PREVIOUS);
 }
 
-static void gfx_opengl_apply_shader(struct ShaderProgram *prg) {
+static void gfx_opengl_legacy_apply_shader(struct ShaderProgram *prg) {
     const float *ofs = cur_buf;
 
     // vertices are always there
@@ -256,7 +255,7 @@ static void gfx_opengl_apply_shader(struct ShaderProgram *prg) {
     }
 }
 
-static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
+static void gfx_opengl_legacy_unload_shader(struct ShaderProgram *old_prg) {
     if (cur_shader == old_prg || old_prg == NULL)
         cur_shader = NULL;
 
@@ -281,12 +280,12 @@ static void gfx_opengl_unload_shader(struct ShaderProgram *old_prg) {
     if (gl_adv_fog) glDisableClientState(GL_FOG_COORD_ARRAY);
 }
 
-static void gfx_opengl_load_shader(struct ShaderProgram *new_prg) {
+static void gfx_opengl_legacy_load_shader(struct ShaderProgram *new_prg) {
     cur_shader = new_prg;
-    // gfx_opengl_apply_shader(cur_shader);
+    // gfx_opengl_legacy_apply_shader(cur_shader);
 }
 
-static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shader_id) {
+static struct ShaderProgram *gfx_opengl_legacy_create_and_load_new_shader(uint32_t shader_id) {
     uint8_t c[2][4];
     for (int i = 0; i < 4; i++) {
         c[0][i] = (shader_id >> (i * 3)) & 7;
@@ -346,12 +345,12 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(uint32_t shad
         if (c[1][3] < SHADER_TEXEL0) prg->mix_flags |= SH_MF_INPUT_ALPHA;
     }
 
-    gfx_opengl_load_shader(prg);
+    gfx_opengl_legacy_load_shader(prg);
 
     return prg;
 }
 
-static struct ShaderProgram *gfx_opengl_lookup_shader(uint32_t shader_id) {
+static struct ShaderProgram *gfx_opengl_legacy_lookup_shader(uint32_t shader_id) {
     for (size_t i = 0; i < shader_program_pool_size; i++) {
         if (shader_program_pool[i].shader_id == shader_id) {
             return &shader_program_pool[i];
@@ -360,24 +359,24 @@ static struct ShaderProgram *gfx_opengl_lookup_shader(uint32_t shader_id) {
     return NULL;
 }
 
-static void gfx_opengl_shader_get_info(struct ShaderProgram *prg, uint8_t *num_inputs, bool used_textures[2]) {
+static void gfx_opengl_legacy_shader_get_info(struct ShaderProgram *prg, uint8_t *num_inputs, bool used_textures[2]) {
     *num_inputs = prg->num_inputs;
     used_textures[0] = prg->texture_used[0];
     used_textures[1] = prg->texture_used[1];
 }
 
-static GLuint gfx_opengl_new_texture(void) {
+static GLuint gfx_opengl_legacy_new_texture(void) {
     GLuint ret;
     glGenTextures(1, &ret);
     return ret;
 }
 
-static void gfx_opengl_select_texture(int tile, GLuint texture_id) {
+static void gfx_opengl_legacy_select_texture(int tile, GLuint texture_id) {
     glActiveTexture(GL_TEXTURE0 + tile);
     glBindTexture(GL_TEXTURE_2D, texture_id);
 }
 
-static void gfx_opengl_upload_texture(uint8_t *rgba32_buf, int width, int height) {
+static void gfx_opengl_legacy_upload_texture(uint8_t *rgba32_buf, int width, int height) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba32_buf);
 }
 
@@ -387,7 +386,7 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
     return (val & G_TX_MIRROR) ? GL_MIRRORED_REPEAT : GL_REPEAT;
 }
 
-static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+static void gfx_opengl_legacy_set_sampler_parameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
     const GLenum filter = linear_filter ? GL_LINEAR : GL_NEAREST;
     glActiveTexture(GL_TEXTURE0 + tile);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
@@ -396,7 +395,7 @@ static void gfx_opengl_set_sampler_parameters(int tile, bool linear_filter, uint
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gfx_cm_to_opengl(cmt));
 }
 
-static void gfx_opengl_set_depth_test(bool depth_test) {
+static void gfx_opengl_legacy_set_depth_test(bool depth_test) {
     if (depth_test) {
         glEnable(GL_DEPTH_TEST);
     } else {
@@ -404,11 +403,11 @@ static void gfx_opengl_set_depth_test(bool depth_test) {
     }
 }
 
-static void gfx_opengl_set_depth_mask(bool z_upd) {
+static void gfx_opengl_legacy_set_depth_mask(bool z_upd) {
     glDepthMask(z_upd ? GL_TRUE : GL_FALSE);
 }
 
-static void gfx_opengl_set_zmode_decal(bool zmode_decal) {
+static void gfx_opengl_legacy_set_zmode_decal(bool zmode_decal) {
     if (zmode_decal) {
         glPolygonOffset(-2, -2);
         glEnable(GL_POLYGON_OFFSET_FILL);
@@ -418,15 +417,15 @@ static void gfx_opengl_set_zmode_decal(bool zmode_decal) {
     }
 }
 
-static void gfx_opengl_set_viewport(int x, int y, int width, int height) {
+static void gfx_opengl_legacy_set_viewport(int x, int y, int width, int height) {
     glViewport(x, y, width, height);
 }
 
-static void gfx_opengl_set_scissor(int x, int y, int width, int height) {
+static void gfx_opengl_legacy_set_scissor(int x, int y, int width, int height) {
     glScissor(x, y, width, height);
 }
 
-static void gfx_opengl_set_use_alpha(bool use_alpha) {
+static void gfx_opengl_legacy_set_use_alpha(bool use_alpha) {
     gl_blend = use_alpha;
     if (use_alpha) {
         glEnable(GL_BLEND);
@@ -438,7 +437,7 @@ static void gfx_opengl_set_use_alpha(bool use_alpha) {
 // draws the same triangles as plain fog color + fog intensity as alpha
 // on top of the normal tris and blends them to achieve sort of the same effect
 // as fog would
-static inline void gfx_opengl_blend_fog_tris(void) {
+static inline void gfx_opengl_legacy_blend_fog_tris(void) {
     // if a texture was used, replace it with fog color instead, but still keep the alpha
     if (cur_shader->texture_used[0]) {
         glActiveTexture(GL_TEXTURE0);
@@ -461,7 +460,7 @@ static inline void gfx_opengl_blend_fog_tris(void) {
     glDisableClientState(GL_COLOR_ARRAY); // will get reenabled later anyway
 }
 
-static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+static void gfx_opengl_legacy_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     //printf("flushing %d tris\n", buf_vbo_num_tris);
 
     cur_buf = buf_vbo;
@@ -469,12 +468,12 @@ static void gfx_opengl_draw_triangles(float buf_vbo[], size_t buf_vbo_len, size_
     cur_buf_num_tris = buf_vbo_num_tris;
     cur_buf_stride = cur_buf_size / (3 * cur_buf_num_tris);
 
-    gfx_opengl_apply_shader(cur_shader);
+    gfx_opengl_legacy_apply_shader(cur_shader);
 
     glDrawArrays(GL_TRIANGLES, 0, 3 * cur_buf_num_tris);
 
     // cur_fog_ofs is only set if GL_EXT_fog_coord isn't used
-    if (cur_fog_ofs) gfx_opengl_blend_fog_tris();
+    if (cur_fog_ofs) gfx_opengl_legacy_blend_fog_tris();
 }
 
 static inline bool gl_check_ext(const char *name) {
@@ -507,7 +506,7 @@ static inline bool gl_get_version(int *major, int *minor, bool *is_es) {
     return (sscanf(vstr, "%d.%d", major, minor) == 2);
 }
 
-static void gfx_opengl_init(void) {
+static void gfx_opengl_legacy_init(void) {
 #if FOR_WINDOWS || defined(OSX_BUILD)
     glewInit();
 #endif
@@ -567,7 +566,7 @@ static void gfx_opengl_init(void) {
     TEXENV_COMBINE_OP(1, GL_SRC_COLOR, GL_SRC_ALPHA);
 }
 
-static void gfx_opengl_start_frame(void) {
+static void gfx_opengl_legacy_start_frame(void) {
     glDisable(GL_SCISSOR_TEST);
     glDepthMask(GL_TRUE); // Must be set to clear Z-buffer
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -575,30 +574,28 @@ static void gfx_opengl_start_frame(void) {
     glEnable(GL_SCISSOR_TEST);
 }
 
-static void gfx_opengl_shutdown(void) {
+static void gfx_opengl_legacy_shutdown(void) {
 }
 
-struct GfxRenderingAPI gfx_opengl_api = {
-    gfx_opengl_z_is_from_0_to_1,
-    gfx_opengl_unload_shader,
-    gfx_opengl_load_shader,
-    gfx_opengl_create_and_load_new_shader,
-    gfx_opengl_lookup_shader,
-    gfx_opengl_shader_get_info,
-    gfx_opengl_new_texture,
-    gfx_opengl_select_texture,
-    gfx_opengl_upload_texture,
-    gfx_opengl_set_sampler_parameters,
-    gfx_opengl_set_depth_test,
-    gfx_opengl_set_depth_mask,
-    gfx_opengl_set_zmode_decal,
-    gfx_opengl_set_viewport,
-    gfx_opengl_set_scissor,
-    gfx_opengl_set_use_alpha,
-    gfx_opengl_draw_triangles,
-    gfx_opengl_init,
-    gfx_opengl_start_frame,
-    gfx_opengl_shutdown
+struct GfxRenderingAPI gfx_opengl_legacy_api = {
+    gfx_opengl_legacy_z_is_from_0_to_1,
+    gfx_opengl_legacy_unload_shader,
+    gfx_opengl_legacy_load_shader,
+    gfx_opengl_legacy_create_and_load_new_shader,
+    gfx_opengl_legacy_lookup_shader,
+    gfx_opengl_legacy_shader_get_info,
+    gfx_opengl_legacy_new_texture,
+    gfx_opengl_legacy_select_texture,
+    gfx_opengl_legacy_upload_texture,
+    gfx_opengl_legacy_set_sampler_parameters,
+    gfx_opengl_legacy_set_depth_test,
+    gfx_opengl_legacy_set_depth_mask,
+    gfx_opengl_legacy_set_zmode_decal,
+    gfx_opengl_legacy_set_viewport,
+    gfx_opengl_legacy_set_scissor,
+    gfx_opengl_legacy_set_use_alpha,
+    gfx_opengl_legacy_draw_triangles,
+    gfx_opengl_legacy_init,
+    gfx_opengl_legacy_start_frame,
+    gfx_opengl_legacy_shutdown
 };
-
-#endif // LEGACY_GL
