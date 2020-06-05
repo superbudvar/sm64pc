@@ -51,7 +51,7 @@ extern struct MarioAnimation gDemo;
 extern u8 gMarioAnims[];
 extern u8 gDemoInputs[];
 
-#define GFX_POOL_SIZE 64000
+#define GFX_POOL_SIZE 64000*5
 
 struct GfxPool {
     Gfx buffer[GFX_POOL_SIZE];

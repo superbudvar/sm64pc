@@ -199,7 +199,7 @@ static void gfx_sdl_main_loop(void (*run_one_game_iter)(void)) {
         run_one_game_iter();
         t = SDL_GetTicks() - t;
         if (t < FRAME_TIME && configWindow.vsync <= 1)
-            SDL_Delay(FRAME_TIME - t);
+            SDL_Delay(0);
     }
 }
 

@@ -95,6 +95,21 @@ struct ColorCombiner {
     uint8_t shader_input_mapping[2][4];
 };
 
+#define NUM_LAYERS 8
+struct SavedVertex {
+    float x, y, z, w;
+};
+
+struct SavedGraphNode {
+    uintptr_t id;
+    struct SavedGraphNode *children;
+    struct SavedVertex *vertices;
+    uint32_t children_size;
+    uint32_t children_capacity;
+    uint32_t vertices_size;
+    uint32_t vertices_capacity;
+};
+
 static struct ColorCombiner color_combiner_pool[64];
 static uint8_t color_combiner_pool_size;
 
@@ -120,6 +135,13 @@ static struct RSP {
     } texture_scaling_factor;
     
     struct LoadedVertex loaded_vertices[MAX_VERTICES + 4];
+
+    struct SavedGraphNode saved_graph_nodes[NUM_LAYERS];
+    struct SavedGraphNode *graph_node_stack[128];
+    uint32_t vertex_index_stack[128];
+    uint8_t graph_node_stack_depth;
+    bool interpolated_frame;
+    int8_t current_layer;
 } rsp;
 
 static struct RDP {
@@ -838,6 +860,36 @@ static void gfx_sp_vertex(size_t n_vertices, size_t dest_index, const Vtx *verti
         if (y > w) d->clip_rej |= 8;
         if (z < -w) d->clip_rej |= 16;
         if (z > w) d->clip_rej |= 32;
+    
+        if (rsp.current_layer >= 0) {
+            if (!rsp.interpolated_frame) {
+                struct SavedGraphNode *cur_top = rsp.graph_node_stack[rsp.graph_node_stack_depth - 1];
+                if (cur_top->vertices_size == cur_top->vertices_capacity) {
+                    if (cur_top->vertices_capacity == 0) {
+                        cur_top->vertices_capacity = 4;
+                    }
+                    cur_top->vertices_capacity *= 2;
+                    cur_top->vertices = (struct SavedVertex *)realloc(cur_top->vertices, cur_top->vertices_capacity * sizeof(struct SavedVertex));
+                }
+                struct SavedVertex *sv = &cur_top->vertices[cur_top->vertices_size++];
+                sv->x = x;
+                sv->y = y;
+                sv->z = z;
+                sv->w = w;
+            } else {
+                struct SavedGraphNode *cur_top = rsp.graph_node_stack[rsp.graph_node_stack_depth - 1];
+                if (cur_top != NULL) {
+                    uint32_t *vtx_idx = &rsp.vertex_index_stack[rsp.graph_node_stack_depth - 1];
+                    if (*vtx_idx < cur_top->vertices_size) {
+                        struct SavedVertex *sv = &cur_top->vertices[(*vtx_idx)++];
+                        x = (x + sv->x) / 2.0f;
+                        y = (y + sv->y) / 2.0f;
+                        z = (z + sv->z) / 2.0f;
+                        w = (w + sv->w) / 2.0f;
+                    }
+                }
+            }
+        }
         
         d->x = x;
         d->y = y;
@@ -1159,6 +1211,54 @@ static void gfx_sp_moveword(uint8_t index, uint16_t offset, uint32_t data) {
 static void gfx_sp_texture(uint16_t sc, uint16_t tc, uint8_t level, uint8_t tile, uint8_t on) {
     rsp.texture_scaling_factor.s = sc;
     rsp.texture_scaling_factor.t = tc;
+}
+
+static void gfx_sp_push_graph_node(uint8_t layer, uintptr_t id) {
+    if (rsp.current_layer != layer) {
+        assert(rsp.graph_node_stack_depth <= 1);
+        rsp.graph_node_stack[0] = &rsp.saved_graph_nodes[layer];
+        rsp.graph_node_stack_depth = 1;
+        rsp.current_layer = layer;
+    }
+    struct SavedGraphNode *cur_top = rsp.graph_node_stack[rsp.graph_node_stack_depth - 1];
+
+    if (!rsp.interpolated_frame) {
+        if (cur_top->children_size == cur_top->children_capacity) {
+            if (cur_top->children_capacity == 0) {
+                cur_top->children_capacity = 1;
+            }
+            cur_top->children_capacity *= 2;
+            cur_top->children = (struct SavedGraphNode *)realloc(cur_top->children, cur_top->children_capacity * sizeof(struct SavedGraphNode));
+        }
+        cur_top = &cur_top->children[cur_top->children_size++];
+        memset(cur_top, 0, sizeof(*cur_top));
+        cur_top->id = id;
+        rsp.graph_node_stack[rsp.graph_node_stack_depth++] = cur_top;
+    } else {
+        struct SavedGraphNode *new_top = NULL;
+        if (cur_top != NULL) {
+            for (uint32_t i = 0; i < cur_top->children_size; i++) {
+                struct SavedGraphNode *child = &cur_top->children[i];
+                if (child->id == id) {
+                    new_top = child;
+                    break;
+                }
+            }
+        }
+        rsp.vertex_index_stack[rsp.graph_node_stack_depth] = 0;
+        rsp.graph_node_stack[rsp.graph_node_stack_depth++] = new_top;
+        //for (int i = 0; i < rsp.graph_node_stack_depth - 1; i++) printf(" ");
+        //printf("> %p%s\n", (void *)id, new_top != NULL ? " FOUND" : "-");
+    }
+    assert(rsp.graph_node_stack_depth <= 128);
+}
+
+static void gfx_sp_pop_graph_node(uint8_t layer) {
+    assert(rsp.graph_node_stack_depth > 1);
+    if (--rsp.graph_node_stack_depth == 1) {
+        // Root node reached
+        rsp.current_layer = -1;
+    }
 }
 
 static void gfx_dp_set_scissor(uint32_t mode, uint32_t ulx, uint32_t uly, uint32_t lrx, uint32_t lry) {
@@ -1613,6 +1713,13 @@ static void gfx_run_dl(Gfx* cmd) {
                 gfx_sp_set_other_mode(C0(8, 8) + 32, C0(0, 8), (uint64_t) cmd->words.w1 << 32);
 #endif
                 break;
+
+            case G_PUSHGRAPHNODE:
+                gfx_sp_push_graph_node(C0(0, 8), cmd->words.w1);
+                break;
+            case G_POPGRAPHNODE:
+                gfx_sp_pop_graph_node(C0(0, 8));
+                break;
             
             // RDP Commands:
             case G_SETTIMG:
@@ -1720,6 +1827,7 @@ static void gfx_sp_reset() {
     rsp.modelview_matrix_stack_size = 1;
     rsp.current_num_lights = 2;
     rsp.lights_changed = true;
+    rsp.current_layer = -1;
 }
 
 void gfx_get_dimensions(uint32_t *width, uint32_t *height) {
@@ -1780,8 +1888,21 @@ void gfx_start_frame(void) {
     gfx_current_dimensions.aspect_ratio = (float)gfx_current_dimensions.width / (float)gfx_current_dimensions.height;
 }
 
+static void gfx_clear_graph_nodes(struct SavedGraphNode *node) {
+    if (node->children_capacity > 0) {
+        for (uint32_t i = 0; i < node->children_size; i++) {
+            gfx_clear_graph_nodes(&node->children[i]);
+        }
+        free(node->children);
+    }
+    if (node->vertices_capacity > 0) {
+        free(node->vertices);
+    }
+}
+
 void gfx_run(Gfx *commands) {
     gfx_sp_reset();
+    rsp.interpolated_frame = true;
     
     //puts("New frame");
     
@@ -1796,6 +1917,27 @@ void gfx_run(Gfx *commands) {
     gfx_run_dl(commands);
     gfx_flush();
     double t1 = gfx_wapi->get_time();
+    //printf("Process %f %f\n", t1, t1 - t0);
+    gfx_wapi->swap_buffers_begin();
+    rsp.interpolated_frame = false;
+    for (int i = 0; i < NUM_LAYERS; i++) {
+        gfx_clear_graph_nodes(&rsp.saved_graph_nodes[i]);
+    }
+    memset(rsp.saved_graph_nodes, 0, sizeof(rsp.saved_graph_nodes));
+
+    gfx_wapi->swap_buffers_end();
+
+    if (!gfx_wapi->start_frame()) {
+        dropped_frame = true;
+        return;
+    }
+    dropped_frame = false;
+
+    t0 = gfx_wapi->get_time();
+    gfx_rapi->start_frame();
+    gfx_run_dl(commands);
+    gfx_flush();
+    t1 = gfx_wapi->get_time();
     //printf("Process %f %f\n", t1, t1 - t0);
     gfx_wapi->swap_buffers_begin();
 }

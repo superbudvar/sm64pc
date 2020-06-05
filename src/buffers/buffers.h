@@ -27,7 +27,7 @@ extern struct SaveBuffer gSaveBuffer;
 
 extern u8 gGfxSPTaskStack[];
 
-#define GFX_NUM_POOLS 1
+#define GFX_NUM_POOLS 2
 
 extern struct GfxPool gGfxPools[GFX_NUM_POOLS];
 

@@ -11,6 +11,9 @@
 #include "game_init.h"
 #include "rendering_graph_node.h"
 
+#include <assert.h>
+#include <stdio.h>
+
 /**
  * This file contains the code that processes the scene graph for rendering.
  * The scene graph is responsible for drawing everything except the HUD / text boxes.
@@ -125,6 +128,11 @@ struct GraphNodeObject *gCurGraphNodeObject = NULL;
 struct GraphNodeHeldObject *gCurGraphNodeHeldObject = NULL;
 u16 gAreaUpdateCounter = 0;
 
+static struct GraphNode *sGraphNodeStacks[GFX_NUM_MASTER_LISTS][128];
+static u8 sGraphNodeStackDepths[GFX_NUM_MASTER_LISTS];
+static struct GraphNode *sGraphNodeProcessingStack[128];
+static u8 sGraphNodeProcessingStackDepth;
+
 #ifdef F3DEX_GBI_2
 LookAt lookAt;
 #endif
@@ -156,10 +164,25 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
         if ((currList = node->listHeads[i]) != NULL) {
             gDPSetRenderMode(gDisplayListHead++, modeList->modes[i], mode2List->modes[i]);
             while (currList != NULL) {
+                if (currList->transform == (void *)1) {
+                    // Pop node
+                    gSPPopGraphNode(gDisplayListHead++, i);
+                    currList = currList->next;
+                    continue;
+                } else if (currList->transform == (void *)2) {
+                    // Push node
+                    gSPPushGraphNode(gDisplayListHead++, i, currList->displayList);
+                    currList = currList->next;
+                    continue;
+                }
                 gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(currList->transform),
                           G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
                 gSPDisplayList(gDisplayListHead++, currList->displayList);
                 currList = currList->next;
+            }
+            while (sGraphNodeStackDepths[i] > 0) {
+                gSPPopGraphNode(gDisplayListHead++, i);
+                sGraphNodeStackDepths[i]--;
             }
         }
     }
@@ -167,6 +190,22 @@ static void geo_process_master_list_sub(struct GraphNodeMasterList *node) {
         gDPPipeSync(gDisplayListHead++);
         gSPClearGeometryMode(gDisplayListHead++, G_ZBUFFER);
     }
+}
+
+static void geo_append_display_list_node(void *displayList, void *transform, s16 layer) {
+    struct DisplayListNode *listNode =
+        alloc_only_pool_alloc(gDisplayListHeap, sizeof(struct DisplayListNode));
+
+    assert(listNode != NULL);
+    listNode->transform = transform;
+    listNode->displayList = displayList;
+    listNode->next = 0;
+    if (gCurGraphNodeMasterList->listHeads[layer] == 0) {
+        gCurGraphNodeMasterList->listHeads[layer] = listNode;
+    } else {
+        gCurGraphNodeMasterList->listTails[layer]->next = listNode;
+    }
+    gCurGraphNodeMasterList->listTails[layer] = listNode;
 }
 
 /**
@@ -180,18 +219,30 @@ static void geo_append_display_list(void *displayList, s16 layer) {
     gSPLookAt(gDisplayListHead++, &lookAt);
 #endif
     if (gCurGraphNodeMasterList != 0) {
-        struct DisplayListNode *listNode =
-            alloc_only_pool_alloc(gDisplayListHeap, sizeof(struct DisplayListNode));
+        s32 commonLength = MIN(sGraphNodeStackDepths[layer], sGraphNodeProcessingStackDepth);
+        s32 samePrefixLength = 0;
+        s32 toRemove;
 
-        listNode->transform = gMatStackFixed[gMatStackIndex];
-        listNode->displayList = displayList;
-        listNode->next = 0;
-        if (gCurGraphNodeMasterList->listHeads[layer] == 0) {
-            gCurGraphNodeMasterList->listHeads[layer] = listNode;
-        } else {
-            gCurGraphNodeMasterList->listTails[layer]->next = listNode;
+        // The geo "tree" is really a directed acyclic graph, so we must check the whole prefix
+        while (samePrefixLength < commonLength && sGraphNodeStacks[layer][samePrefixLength] == sGraphNodeProcessingStack[samePrefixLength]) {
+            samePrefixLength++;
         }
-        gCurGraphNodeMasterList->listTails[layer] = listNode;
+        toRemove = sGraphNodeStackDepths[layer] - samePrefixLength;
+        while (toRemove > 0) {
+            // Pop node
+            geo_append_display_list_node(NULL, (void *)1, layer);
+            toRemove--;
+        }
+
+        while (samePrefixLength < sGraphNodeProcessingStackDepth) {
+            // Push node
+            sGraphNodeStacks[layer][samePrefixLength] = sGraphNodeProcessingStack[samePrefixLength];
+            geo_append_display_list_node(sGraphNodeProcessingStack[samePrefixLength++], (void *)2, layer);
+        }
+
+        sGraphNodeStackDepths[layer] = samePrefixLength;
+
+        geo_append_display_list_node(displayList, gMatStackFixed[gMatStackIndex], layer);
     }
 }
 
@@ -931,6 +982,46 @@ void geo_try_process_children(struct GraphNode *node) {
     }
 }
 
+static const char *sNodeTypes[] = {
+    "_",
+    "ROOT",
+    "ORTHO_PROJECTION",
+    "PERSPECTIVE",
+    "MASTER_LIST",
+    "_", "_", "_", "_", "_",
+    "START",
+    "LEVEL_OF_DETAIL",
+    "SWITCH_CASE",
+    "_", "_", "_", "_", "_", "_", "_",
+    "CAMERA",
+    "TRANSLATION_ROTATION",
+    "TRANSLATION",
+    "ROTATION",
+    "OBJECT",
+    "ANIMATED_PART",
+    "BILLBOARD",
+    "DISPLAY_LIST",
+    "SCALE",
+    "_", "_", "_", "_", "_", "_", "_", "_", "_", "_", "_",
+    "SHADOW",
+    "OBJECT_PARENT",
+    "GENERATED_LIST",
+    "_",
+    "BACKGROUND",
+    "_",
+    "HELD_OBJ",
+    "CULLING_RADIUS"
+};
+
+static const char *get_node_type(int t) {
+    if (sNodeTypes[t][0] == '_') {
+        static char buf[16];
+        sprintf(buf, "%02x", t);
+        return buf;
+    }
+    return sNodeTypes[t];
+}
+
 /**
  * Process a generic geo node and its siblings.
  * The first argument is the start node, and all its siblings will
@@ -952,6 +1043,15 @@ void geo_process_node_and_siblings(struct GraphNode *firstNode) {
             if (curGraphNode->flags & GRAPH_RENDER_CHILDREN_FIRST) {
                 geo_try_process_children(curGraphNode);
             } else {
+                if (curGraphNode->type == GRAPH_NODE_TYPE_BACKGROUND) {
+                    sGraphNodeProcessingStack[sGraphNodeProcessingStackDepth++] = (void *)(uintptr_t)gGlobalTimer;
+                } else if (curGraphNode->type == GRAPH_NODE_TYPE_SWITCH_CASE || curGraphNode->type == GRAPH_NODE_TYPE_DISPLAY_LIST) {
+                    sGraphNodeProcessingStack[sGraphNodeProcessingStackDepth++] = NULL;
+                } else {
+                    sGraphNodeProcessingStack[sGraphNodeProcessingStackDepth++] = curGraphNode;
+                }
+                /*for (int i = 0; i < sGraphNodeProcessingStackDepth; i++) printf(" ");
+                printf("> %p %s\n", curGraphNode, get_node_type(curGraphNode->type % 0x30));*/
                 switch (curGraphNode->type) {
                     case GRAPH_NODE_TYPE_ORTHO_PROJECTION:
                         geo_process_ortho_projection((struct GraphNodeOrthoProjection *) curGraphNode);
@@ -1015,6 +1115,9 @@ void geo_process_node_and_siblings(struct GraphNode *firstNode) {
                         geo_try_process_children((struct GraphNode *) curGraphNode);
                         break;
                 }
+                /*for (int i = 0; i < sGraphNodeProcessingStackDepth; i++) printf(" ");
+                printf("< %p\n", curGraphNode);*/
+                sGraphNodeProcessingStackDepth--;
             }
         } else {
             if (curGraphNode->type == GRAPH_NODE_TYPE_OBJECT) {

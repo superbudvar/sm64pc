@@ -117,6 +117,9 @@
 #define G_SPECIAL_2		0xd4
 #define G_SPECIAL_3		0xd3
 
+#define G_PUSHGRAPHNODE 0xd1
+#define G_POPGRAPHNODE  0xd2
+
 #define G_VTX			0x01
 #define G_MODIFYVTX		0x02
 #define G_CULLDL		0x03
@@ -2979,6 +2982,22 @@ typedef union {
 	(unsigned int)(data)						\
 }}
 #endif
+
+#define gSPPushGraphNode(pkt, layer, node) \
+{ \
+    Gfx *_g = (Gfx *)(pkt); \
+    \
+    _g->words.w0 = (_SHIFTL(G_PUSHGRAPHNODE, 24, 8) | _SHIFTL(layer, 0, 24)); \
+    _g->words.w1 = (uintptr_t)(node); \
+}
+
+#define gSPPopGraphNode(pkt, layer) \
+{ \
+    Gfx *_g = (Gfx *)(pkt); \
+    \
+    _g->words.w0 = (_SHIFTL(G_POPGRAPHNODE, 24, 8) | _SHIFTL(layer, 0, 24)); \
+    _g->words.w1 = 0; \
+}
 
 /*
  * RDP setothermode register commands - register shadowed in RSP
